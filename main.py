@@ -121,10 +121,6 @@ class ToolFilteredJobAggregator:
         df.drop_duplicates(subset=["url"], inplace=True)
         return df.to_dict("records")
 
-    # ------------------------------------------------------------------
-    # NEW-JOBS TRACKING — keeps a small SQLite file of URLs already sent
-    # so the daily email only contains listings you haven't seen before.
-    # ------------------------------------------------------------------
     def filter_new_jobs(self, jobs):
         conn = sqlite3.connect(self.db_path)
         conn.execute(
@@ -232,15 +228,12 @@ if __name__ == "__main__":
     matched_jobs = scraper.get_filtered_jobs()
     print(f"\nFound {len(matched_jobs)} total matching job(s) this run.")
 
-    # Only email jobs we haven't already sent before
     new_jobs = scraper.filter_new_jobs(matched_jobs)
     print(f"{len(new_jobs)} of those are new since last run.")
 
     for job in new_jobs:
         print(f"- {job['title']} at {job['company']} [{job['source']}] | Tools: {job['tools_found']}")
 
-    # Email sending — reads credentials from environment variables
-    # (set as GitHub Actions secrets — see workflow file)
     EMAIL_SENDER = os.environ.get("EMAIL_SENDER")
     EMAIL_APP_PASSWORD = os.environ.get("EMAIL_APP_PASSWORD")
     EMAIL_RECIPIENT = os.environ.get("EMAIL_RECIPIENT")
@@ -250,5 +243,3 @@ if __name__ == "__main__":
     else:
         print("Email credentials not set — skipping email send (set EMAIL_SENDER, "
               "EMAIL_APP_PASSWORD, EMAIL_RECIPIENT as env vars / GitHub secrets).")
-        
-      
