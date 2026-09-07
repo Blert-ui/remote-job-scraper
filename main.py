@@ -199,9 +199,7 @@ def send_email_digest(jobs, recipient, sender, app_password):
 
 
 if __name__ == "__main__":
-    my_target_tools = ["Klaviyo", "HubSpot", "Mailchimp", "ActiveCampaign",
-                        "Marketo", "Salesforce Marketing Cloud", "Pardot",
-                        "Omnisend", "ConvertKit"]
+    my_target_tools = []  # no longer required — title match alone is enough
 
     my_target_titles = [
         "email marketing", "email marketer", "email campaign",
