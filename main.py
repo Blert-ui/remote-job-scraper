@@ -6,136 +6,211 @@ import requests
 
 
 class ToolFilteredJobAggregator:
+    def __init__(
+        self, required_tools=None, required_titles=None, db_path="jobs_history.db"
+    ):
+        # Standardize required tools list (e.g., ['klaviyo', 'hubspot'])
+        self.required_tools = [t.lower() for t in (required_tools or [])]
 
-  def __init__(
-      self, required_tools=None, db_path="jobs_history.db"
-  ):
-    # Standardize required tools list (e.g., ['klaviyo', 'hubspot'])
-    self.required_tools = [t.lower() for t in (required_tools or [])]
+        # Standardize required title-keywords list (e.g., ['email marketing'])
+        self.required_titles = [t.lower() for t in (required_titles or [])]
 
-    # Map target platforms to regex variations to capture typos or phrasing
-    self.tool_patterns = {
-        "Klaviyo": r"\bklaviyo\b",
-        "HubSpot": r"\bhubspot\b",
-        "Mailchimp": r"\bmailchimp\b",
-        "ActiveCampaign": r"\bactive\s*campaign\b",
-        "Marketo": r"\bmarketo\b",
-        "Salesforce Marketing Cloud": (
-            r"\b(sfmc|salesforce marketing cloud|exacttarget)\b"
-        ),
-        "Pardot": r"\bpardot\b",
-        "Omnisend": r"\bomnisend\b",
-        "ConvertKit": r"\bconvertkit\b",
-    }
-    self.headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ToolScraper/1.0"
-    }
-    self.jobs = []
-    self.db_path = db_path
+        # Map target platforms to regex variations to capture typos or phrasing
+        self.tool_patterns = {
+            "Klaviyo": r"\bklaviyo\b",
+            "HubSpot": r"\bhubspot\b",
+            "Mailchimp": r"\bmailchimp\b",
+            "ActiveCampaign": r"\bactive\s*campaign\b",
+            "Marketo": r"\bmarketo\b",
+            "Salesforce Marketing Cloud": (
+                r"\b(sfmc|salesforce marketing cloud|exacttarget)\b"
+            ),
+            "Pardot": r"\bpardot\b",
+            "Omnisend": r"\bomnisend\b",
+            "ConvertKit": r"\bconvertkit\b",
+        }
 
-  def _detect_tools(self, text):
-    """Scans job text using regex and returns a list of detected tools."""
-    detected = []
-    text_lower = text.lower()
-    for tool_name, pattern in self.tool_patterns.items():
-      if re.search(pattern, text_lower):
-        detected.append(tool_name)
-    return detected
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ToolScraper/1.0"
+        }
+        self.jobs = []
+        self.db_path = db_path
 
-  def _matches_tool_filter(self, detected_tools):
-    """Verifies if job contains at least one of the user's required tools."""
-    if not self.required_tools:
-      return True  # If no filter specified, keep all
-    detected_lower = [t.lower() for t in detected_tools]
-    return any(
-        req_tool in detected_lower for req_tool in self.required_tools
-    )
+    def _detect_tools(self, text):
+        """Scans job text using regex and returns a list of detected tools."""
+        detected = []
+        text_lower = text.lower()
+        for tool_name, pattern in self.tool_patterns.items():
+            if re.search(pattern, text_lower):
+                detected.append(tool_name)
+        return detected
 
-  def fetch_remote_ok(self):
-    """Fetches jobs and filters by required ESP tools."""
-    try:
-      res = requests.get(
-          "https://remoteok.com/api", headers=self.headers, timeout=10
-      )
-      res.raise_for_status()
-      data = res.json()
+    def _matches_tool_filter(self, detected_tools):
+        """Verifies if job contains at least one of the user's required tools."""
+        if not self.required_tools:
+            return True  # If no filter specified, keep all
+        detected_lower = [t.lower() for t in detected_tools]
+        return any(
+            req_tool in detected_lower for req_tool in self.required_tools
+        )
 
-      for item in data[1:]:
-        title = item.get("position", "")
-        tags = " ".join(item.get("tags", []))
-        description = item.get("description", "")
-        combined_text = f"{title} {tags} {description}"
+    def _matches_title_filter(self, title):
+        """Checks if the job title contains any of the desired title keywords."""
+        if not self.required_titles:
+            return True  # If no filter specified, keep all
+        title_lower = title.lower()
+        return any(t in title_lower for t in self.required_titles)
 
-        detected = self._detect_tools(combined_text)
+    def fetch_remote_ok(self):
+        """Fetches jobs and filters by required ESP tools and title keywords."""
+        try:
+            res = requests.get(
+                "https://remoteok.com/api", headers=self.headers, timeout=10
+            )
+            res.raise_for_status()
+            data = res.json()
 
-        # Apply ESP filtering check
-        if self._matches_tool_filter(detected):
-          self.jobs.append({
-              "source": "RemoteOK",
-              "title": title,
-              "company": item.get("company", "N/A"),
-              "tools_found": ", ".join(detected) if detected else "General Email",
-              "url": item.get("url", "N/A"),
-          })
-    except Exception as e:
-      print(f"Error fetching RemoteOK: {e}")
+            for item in data[1:]:
+                title = item.get("position", "")
+                tags = " ".join(item.get("tags", []))
+                description = item.get("description", "")
+                combined_text = f"{title} {tags} {description}"
 
-  def fetch_jobicy(self):
-    """Fetches listings from Jobicy and checks for tool matches."""
-    try:
-      res = requests.get(
-          "https://jobicy.com/api/v2/remote-jobs?count=50",
-          headers=self.headers,
-          timeout=10,
-      )
-      res.raise_for_status()
+                detected = self._detect_tools(combined_text)
 
-      for item in res.json().get("jobs", []):
-        title = item.get("jobTitle", "")
-        description = item.get("jobDescription", "")
-        combined_text = f"{title} {description}"
+                # Apply both ESP filtering and title filtering
+                if self._matches_tool_filter(detected) and self._matches_title_filter(title):
+                    self.jobs.append({
+                        "source": "RemoteOK",
+                        "title": title,
+                        "company": item.get("company", "N/A"),
+                        "tools_found": ", ".join(detected) if detected else "General Email",
+                        "url": item.get("url", "N/A"),
+                    })
+        except Exception as e:
+            print(f"Error fetching RemoteOK: {e}")
 
-        detected = self._detect_tools(combined_text)
+    def fetch_jobicy(self):
+        """Fetches listings from Jobicy and checks for tool and title matches."""
+        try:
+            res = requests.get(
+                "https://jobicy.com/api/v2/remote-jobs?count=50",
+                headers=self.headers,
+                timeout=10,
+            )
+            res.raise_for_status()
 
-        if self._matches_tool_filter(detected):
-          self.jobs.append({
-              "source": "Jobicy",
-              "title": title,
-              "company": item.get("companyName", "N/A"),
-              "tools_found": ", ".join(detected) if detected else "General Email",
-              "url": item.get("url", "N/A"),
-          })
-    except Exception as e:
-      print(f"Error fetching Jobicy: {e}")
+            for item in res.json().get("jobs", []):
+                title = item.get("jobTitle", "")
+                description = item.get("jobDescription", "")
+                combined_text = f"{title} {description}"
 
-  def get_filtered_jobs(self):
-    self.fetch_remote_ok()
-    self.fetch_jobicy()
+                detected = self._detect_tools(combined_text)
 
-    df = pd.DataFrame(self.jobs)
-    if df.empty:
-      print("No listings found matching specified tools.")
-      return []
+                if self._matches_tool_filter(detected) and self._matches_title_filter(title):
+                    self.jobs.append({
+                        "source": "Jobicy",
+                        "title": title,
+                        "company": item.get("companyName", "N/A"),
+                        "tools_found": ", ".join(detected) if detected else "General Email",
+                        "url": item.get("url", "N/A"),
+                    })
+        except Exception as e:
+            print(f"Error fetching Jobicy: {e}")
 
-    # Deduplicate based on URL
-    df.drop_duplicates(subset=["url"], inplace=True)
-    return df.to_dict("records")
+    def get_filtered_jobs(self):
+        self.fetch_remote_ok()
+        self.fetch_jobicy()
+
+        df = pd.DataFrame(self.jobs)
+        if df.empty:
+            print("No listings found matching specified tools/titles.")
+            return []
+
+        # Deduplicate based on URL
+        df.drop_duplicates(subset=["url"], inplace=True)
+        return df.to_dict("records")
 
 
 # Usage Example
 if __name__ == "__main__":
-  # Specify exact ESP tools you want to filter for
-  my_target_tools = ["Klaviyo", "HubSpot"]
+    # Specify exact ESP tools you want to filter for.
+    # Leave as [] to disable tool filtering entirely (title filter still applies).
+    my_target_tools = ["Klaviyo", "HubSpot", "Mailchimp", "ActiveCampaign",
+                        "Marketo", "Salesforce Marketing Cloud", "Pardot",
+                        "Omnisend", "ConvertKit"]
 
-  scraper = ToolFilteredJobAggregator(required_tools=my_target_tools)
-  matched_jobs = scraper.get_filtered_jobs()
+    # Entry-level titles adjacent to / within email marketing.
+    # A job matches if its title contains ANY of these substrings.
+    my_target_titles = [
+        # Core email marketing
+        "email marketing",
+        "email marketer",
+        "email campaign",
+        "email specialist",
+        "email coordinator",
+        "email associate",
+        "email assistant",
+        "email intern",
 
-  print(
-      f"\nFound {len(matched_jobs)} jobs matching {my_target_tools}:"
-  )
-  for job in matched_jobs:
-    print(
-        f"- {job['title']} at {job['company']} [{job['source']}]"
-        f" | Tools: {job['tools_found']}"
+        # Lifecycle / retention / CRM (heavy email overlap)
+        "lifecycle marketing",
+        "lifecycle marketer",
+        "retention marketing",
+        "crm marketing",
+        "crm coordinator",
+        "crm specialist",
+        "crm assistant",
+
+        # Marketing automation
+        "marketing automation",
+        "automation specialist",
+        "automation coordinator",
+
+        # Newsletter / content that's usually email-heavy
+        "newsletter",
+        "content marketing coordinator",
+        "content marketing assistant",
+
+        # Broader digital/growth marketing entry points
+        "digital marketing coordinator",
+        "digital marketing assistant",
+        "digital marketing specialist",
+        "digital marketing intern",
+        "growth marketing coordinator",
+        "growth marketing assistant",
+        "growth marketing specialist",
+        "ecommerce marketing",
+        "e-commerce marketing",
+
+        # General marketing entry-level roles (often own email as one channel)
+        "marketing coordinator",
+        "marketing assistant",
+        "marketing specialist",
+        "marketing associate",
+        "marketing intern",
+        "junior marketer",
+        "junior digital marketer",
+        "marketing analyst",
+
+        # Social + email hybrid roles (common at small companies)
+        "social media and email",
+        "social media & email",
+    ]
+
+    scraper = ToolFilteredJobAggregator(
+        required_tools=my_target_tools,
+        required_titles=my_target_titles,
     )
-    
+    matched_jobs = scraper.get_filtered_jobs()
+
+    print(
+        f"\nFound {len(matched_jobs)} jobs matching tools {my_target_tools} "
+        f"and title keywords:"
+    )
+    for job in matched_jobs:
+        print(
+            f"- {job['title']} at {job['company']} [{job['source']}]"
+            f" | Tools: {job['tools_found']}"
+        )
+      
